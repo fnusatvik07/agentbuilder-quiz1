@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DataSense Agent Builder 2026: Quiz 1</title>
+<link rel="stylesheet" href="/static/style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body class="test-mode">
+
+<div class="topbar">
+    <div class="topbar-brand">
+        <div class="brand-mark">DataSense</div>
+        <div class="brand-line">Agent Builder 2026 · Quiz 1: Tool Calling &amp; ReAct Loop</div>
+    </div>
+    <div class="candidate" id="candidate-label">...</div>
+    <div class="timer" id="timer">15:00</div>
+</div>
+
+<div class="testlayout">
+    <main class="qpanel">
+        <div class="qheader">
+            <div class="qnum" id="qnum">Question 1 of 20</div>
+            <div class="qmeta" id="qmeta">1 mark</div>
+        </div>
+        <div class="qstem" id="qstem"></div>
+        <ul class="options" id="options"></ul>
+    </main>
+
+    <aside class="palette">
+        <h3>Question Palette</h3>
+        <div class="legend">
+            <div><span class="swatch sw-answered"></span> Answered</div>
+            <div><span class="swatch sw-unanswered"></span> Not answered</div>
+            <div><span class="swatch sw-marked"></span> Marked for review</div>
+            <div><span class="swatch sw-current"></span> Current</div>
+        </div>
+        <div class="palette-grid" id="palette-grid"></div>
+        <div class="summary" id="summary"></div>
+    </aside>
+</div>
+
+<div class="footerbar">
+    <div class="left">
+        <button id="prev-btn">← Previous</button>
+        <button id="mark-btn">Mark for Review</button>
+        <button id="clear-btn">Clear Response</button>
+    </div>
+    <div class="right">
+        <button id="next-btn" class="primary">Save &amp; Next →</button>
+        <button id="submit-btn" class="danger">Submit Test</button>
+    </div>
+</div>
+
+<!-- submit-confirm modal -->
+<div class="modal-overlay" id="confirm-modal" style="display:none">
+    <div class="modal">
+        <h2>Submit Test?</h2>
+        <p id="confirm-text"></p>
+        <div class="actions">
+            <button id="confirm-cancel">Cancel</button>
+            <button id="confirm-yes" class="primary">Yes, Submit</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// -------------------------------------------------------------------------
+// State
+
+let attempt = null;        // {attempt_id, started_at, duration_sec, questions, name}
+let answers = {};          // {qid: 'A'|'B'|'C'|'D'}
+let marked = new Set();    // qids marked for review
+let currentIdx = 0;
+let submitting = false;
+let timerHandle = null;
+
+// -------------------------------------------------------------------------
+// Init
+
+(function init() {
+    const stashed = sessionStorage.getItem("attempt");
+    if (!stashed) {
+        alert("No active test session. Returning to start page.");
+        window.location.href = "/";
+        return;
+    }
+    attempt = JSON.parse(stashed);
+    document.getElementById("candidate-label").textContent = attempt.name;
+
+    renderPalette();
+    showQuestion(0);
+    startTimer();
+    bindButtons();
+
+    // Warn before unload
+    window.addEventListener("beforeunload", (e) => {
+        if (!submitting) {
+            e.preventDefault();
+            e.returnValue = "";
+        }
+    });
+})();
+
+// -------------------------------------------------------------------------
+// Timer
+
+function startTimer() {
+    const tick = () => {
+        const elapsed = (Date.now() / 1000) - attempt.started_at;
+        const remaining = Math.max(0, Math.floor(attempt.duration_sec - elapsed));
+        const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+        const ss = String(remaining % 60).padStart(2, "0");
+        const t = document.getElementById("timer");
+        t.textContent = `${mm}:${ss}`;
+        t.classList.toggle("warning", remaining <= 120 && remaining > 30);
+        t.classList.toggle("critical", remaining <= 30);
+        if (remaining <= 0) {
+            clearInterval(timerHandle);
+            autoSubmit();
+        }
+    };
+    tick();
+    timerHandle = setInterval(tick, 1000);
+}
+
+// -------------------------------------------------------------------------
+// Rendering
+
+function showQuestion(idx) {
+    if (idx < 0 || idx >= attempt.questions.length) return;
+    currentIdx = idx;
+    const q = attempt.questions[idx];
+
+    document.getElementById("qnum").textContent = `Question ${idx + 1} of ${attempt.questions.length}`;
+    const meta = document.getElementById("qmeta");
+    meta.textContent = `${q.marks} mark${q.marks > 1 ? "s" : ""}`;
+    meta.className = "qmeta";
+
+    document.getElementById("qstem").innerHTML = q.stem_html;
+
+    const ul = document.getElementById("options");
+    ul.innerHTML = "";
+    for (const opt of q.options) {
+        const li = document.createElement("li");
+        li.className = "option" + (answers[q.id] === opt.key ? " selected" : "");
+        li.dataset.key = opt.key;
+        li.innerHTML = `
+            <input type="radio" name="q${q.id}" value="${opt.key}" ${answers[q.id] === opt.key ? "checked" : ""}>
+            <span class="opt-key">${opt.key}.</span>
+            <span class="opt-text">${opt.html}</span>
+        `;
+        li.addEventListener("click", () => selectOption(q.id, opt.key));
+        ul.appendChild(li);
+    }
+
+    // mark button toggle label
+    document.getElementById("mark-btn").textContent =
+        marked.has(q.id) ? "Unmark Review" : "Mark for Review";
+
+    // prev/next states
+    document.getElementById("prev-btn").disabled = (idx === 0);
+    const isLast = (idx === attempt.questions.length - 1);
+    document.getElementById("next-btn").style.visibility = isLast ? "hidden" : "visible";
+
+    renderPalette();
+    updateSummary();
+}
+
+function selectOption(qid, key) {
+    answers[qid] = key;
+    // refresh option visual state
+    document.querySelectorAll(".option").forEach(li => {
+        li.classList.toggle("selected", li.dataset.key === key);
+        const inp = li.querySelector("input");
+        inp.checked = (li.dataset.key === key);
+    });
+    renderPalette();
+    updateSummary();
+}
+
+function renderPalette() {
+    const grid = document.getElementById("palette-grid");
+    grid.innerHTML = "";
+    attempt.questions.forEach((q, i) => {
+        const cell = document.createElement("div");
+        cell.className = "pcell";
+        if (answers[q.id]) cell.classList.add("answered");
+        if (marked.has(q.id)) cell.classList.add("marked");
+        if (i === currentIdx) cell.classList.add("current");
+        cell.textContent = (i + 1);
+        cell.addEventListener("click", () => showQuestion(i));
+        grid.appendChild(cell);
+    });
+}
+
+function updateSummary() {
+    const answered = Object.keys(answers).length;
+    const total = attempt.questions.length;
+    const markedN = marked.size;
+    document.getElementById("summary").innerHTML = `
+        <div><span>Answered</span><b>${answered} / ${total}</b></div>
+        <div><span>Marked</span><b>${markedN}</b></div>
+        <div><span>Not answered</span><b>${total - answered}</b></div>
+    `;
+}
+
+// -------------------------------------------------------------------------
+// Buttons
+
+function bindButtons() {
+    document.getElementById("prev-btn").addEventListener("click", () => showQuestion(currentIdx - 1));
+    document.getElementById("next-btn").addEventListener("click", () => showQuestion(currentIdx + 1));
+    document.getElementById("mark-btn").addEventListener("click", () => {
+        const qid = attempt.questions[currentIdx].id;
+        if (marked.has(qid)) marked.delete(qid); else marked.add(qid);
+        showQuestion(currentIdx);
+    });
+    document.getElementById("clear-btn").addEventListener("click", () => {
+        const qid = attempt.questions[currentIdx].id;
+        delete answers[qid];
+        showQuestion(currentIdx);
+    });
+    document.getElementById("submit-btn").addEventListener("click", openConfirm);
+
+    document.getElementById("confirm-cancel").addEventListener("click", closeConfirm);
+    document.getElementById("confirm-yes").addEventListener("click", submit);
+
+    // keyboard: 1-4 for A-D, arrow keys for nav
+    document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+        const qid = attempt.questions[currentIdx].id;
+        const map = { "1": "A", "2": "B", "3": "C", "4": "D",
+                      "a": "A", "b": "B", "c": "C", "d": "D" };
+        if (map[e.key.toLowerCase()]) {
+            selectOption(qid, map[e.key.toLowerCase()]);
+        } else if (e.key === "ArrowLeft") {
+            showQuestion(currentIdx - 1);
+        } else if (e.key === "ArrowRight") {
+            showQuestion(currentIdx + 1);
+        }
+    });
+}
+
+// -------------------------------------------------------------------------
+// Submit
+
+function openConfirm() {
+    const total = attempt.questions.length;
+    const answered = Object.keys(answers).length;
+    const unanswered = total - answered;
+    document.getElementById("confirm-text").innerHTML =
+        `You have answered <b>${answered}</b> of ${total}. ${unanswered} unanswered. ` +
+        `Once submitted, you cannot change your answers. Continue?`;
+    document.getElementById("confirm-modal").style.display = "flex";
+}
+
+function closeConfirm() {
+    document.getElementById("confirm-modal").style.display = "none";
+}
+
+async function autoSubmit() {
+    if (submitting) return;
+    alert("Time's up. Submitting your test.");
+    submit();
+}
+
+async function submit() {
+    if (submitting) return;
+    submitting = true;
+    closeConfirm();
+    document.getElementById("submit-btn").disabled = true;
+    document.getElementById("submit-btn").textContent = "Submitting…";
+
+    try {
+        const payload = {
+            attempt_id: attempt.attempt_id,
+            answers: Object.fromEntries(Object.entries(answers).map(([k,v]) => [String(k), v])),
+        };
+        const res = await fetch("/api/submit", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Submit failed");
+        sessionStorage.removeItem("attempt");
+        window.location.href = `/result/${attempt.attempt_id}`;
+    } catch (err) {
+        alert("Submit failed: " + (err.message || err));
+        submitting = false;
+        document.getElementById("submit-btn").disabled = false;
+        document.getElementById("submit-btn").textContent = "Submit Test";
+    }
+}
+</script>
+
+</body>
+</html>

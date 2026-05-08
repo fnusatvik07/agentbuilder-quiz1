@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leaderboard · DataSense Agent Builder 2026 Quiz 1</title>
+<link rel="stylesheet" href="/static/style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<div class="page" style="max-width: 920px;">
+    <div class="brand-mark">DataSense</div>
+    <div class="brand-course">Agent Builder 2026</div>
+    <div class="brand-quiz">Quiz 1 · Tool Calling and ReAct Loop</div>
+
+    <h1 style="margin-top: 18px;">
+        Leaderboard
+        <span class="live-pill" id="live-pill" style="margin-left:10px;">Live</span>
+        <span class="last-updated" id="last-updated"></span>
+    </h1>
+    <div class="subtitle">Ranked by score (desc), tiebreak by time (asc). Refreshes every 5 seconds.</div>
+
+    <div style="margin: 12px 0;">
+        <a href="/">Take the test &rarr;</a>
+        &nbsp;·&nbsp;
+        <a href="/leaderboard/live" target="_blank">Open projector view &rarr;</a>
+    </div>
+
+    <div id="lb-wrap"></div>
+</div>
+
+<script>
+function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${String(s).padStart(2,"0")}s`;
+}
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+    }[c]));
+}
+
+let lastSnapshotKey = "";
+
+async function refresh() {
+    try {
+        const res = await fetch("/api/leaderboard");
+        const rows = await res.json();
+        const wrap = document.getElementById("lb-wrap");
+        document.getElementById("last-updated").textContent =
+            "updated " + new Date().toLocaleTimeString();
+
+        if (!rows.length) {
+            wrap.innerHTML = `<div class="notice">No submissions yet. Be the first.</div>`;
+            return;
+        }
+
+        // Detect new entries to flash them
+        const newKey = rows.map(r => r.name + ":" + r.score + ":" + r.time_sec).join("|");
+        const isFirstLoad = (lastSnapshotKey === "");
+        const prevKeys = new Set(lastSnapshotKey.split("|"));
+        const flashes = new Set();
+        if (!isFirstLoad) {
+            for (const r of rows) {
+                const k = r.name + ":" + r.score + ":" + r.time_sec;
+                if (!prevKeys.has(k)) flashes.add(r.name);
+            }
+        }
+        lastSnapshotKey = newKey;
+
+        let html = `
+            <table class="lb-table">
+              <thead>
+                <tr>
+                  <th class="rank-cell">Rank</th>
+                  <th>Name</th>
+                  <th>Score</th>
+                  <th>Time</th>
+                  <th>Submitted</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        for (const r of rows) {
+            let cls = "";
+            if (r.rank === 1) cls = "top1";
+            else if (r.rank === 2) cls = "top2";
+            else if (r.rank === 3) cls = "top3";
+            const flash = flashes.has(r.name) ? " flash" : "";
+            const submitted = new Date(r.submitted_at * 1000).toLocaleTimeString();
+            html += `
+              <tr class="${cls}${flash}">
+                <td class="rank-cell">${r.rank}</td>
+                <td>${escapeHtml(r.name)}</td>
+                <td class="score-cell">${r.score} / ${r.total}</td>
+                <td>${fmtTime(r.time_sec)}</td>
+                <td>${submitted}</td>
+              </tr>
+            `;
+        }
+        html += "</tbody></table>";
+        wrap.innerHTML = html;
+    } catch (e) {
+        // Silent: keep showing the last good snapshot
+    }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+
+</body>
+</html>

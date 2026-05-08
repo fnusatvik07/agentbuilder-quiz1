@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Live Leaderboard · DataSense Agent Builder 2026</title>
+<link rel="stylesheet" href="/static/style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body class="projector">
+
+<div class="projector-page">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+            <div class="brand-mark">DataSense</div>
+            <div class="brand-course">Agent Builder 2026</div>
+            <div class="brand-quiz">Quiz 1 · Tool Calling and ReAct Loop</div>
+        </div>
+        <div style="text-align: right;">
+            <span class="live-pill">Live</span>
+            <span class="last-updated" id="last-updated"></span>
+            <div style="margin-top: 8px;">
+                <span style="color: #b3c4d6; font-size: 14px;">Submissions:</span>
+                <span id="count" style="color: #fff; font-weight: 700; font-size: 20px;">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="lb-wrap" style="flex:1; overflow-y: auto;"></div>
+</div>
+
+<script>
+function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${String(s).padStart(2,"0")}s`;
+}
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+    }[c]));
+}
+
+const TOP_N = 20;
+let lastSnapshotKey = "";
+
+async function refresh() {
+    try {
+        const res = await fetch("/api/leaderboard");
+        const rows = await res.json();
+        const wrap = document.getElementById("lb-wrap");
+        document.getElementById("last-updated").textContent =
+            "updated " + new Date().toLocaleTimeString();
+        document.getElementById("count").textContent = rows.length;
+
+        if (!rows.length) {
+            wrap.innerHTML = `<div class="projector-empty">Waiting for the first submission...</div>`;
+            return;
+        }
+
+        const newKey = rows.map(r => r.name + ":" + r.score + ":" + r.time_sec).join("|");
+        const isFirstLoad = (lastSnapshotKey === "");
+        const prevKeys = new Set(lastSnapshotKey.split("|"));
+        const flashes = new Set();
+        if (!isFirstLoad) {
+            for (const r of rows) {
+                const k = r.name + ":" + r.score + ":" + r.time_sec;
+                if (!prevKeys.has(k)) flashes.add(r.name);
+            }
+        }
+        lastSnapshotKey = newKey;
+
+        const showRows = rows.slice(0, TOP_N);
+        let html = `
+            <table class="projector-table">
+              <thead>
+                <tr>
+                  <th class="rank-cell">Rank</th>
+                  <th>Name</th>
+                  <th>Score</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        for (const r of showRows) {
+            let cls = "";
+            if (r.rank === 1) cls = "gold";
+            else if (r.rank === 2) cls = "silver";
+            else if (r.rank === 3) cls = "bronze";
+            const flash = flashes.has(r.name) ? " flash" : "";
+            html += `
+              <tr class="${cls}${flash}">
+                <td class="rank-cell">${r.rank}</td>
+                <td>${escapeHtml(r.name)}</td>
+                <td class="score-cell">${r.score} / ${r.total}</td>
+                <td>${fmtTime(r.time_sec)}</td>
+              </tr>
+            `;
+        }
+        html += "</tbody></table>";
+        if (rows.length > TOP_N) {
+            html += `<div style="text-align:center; color:#b3c4d6; font-size:14px; margin-top:12px;">
+                       Showing top ${TOP_N} of ${rows.length}
+                     </div>`;
+        }
+        wrap.innerHTML = html;
+    } catch (e) { /* silent */ }
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+
+</body>
+</html>

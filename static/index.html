@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DataSense Agent Builder 2026: Quiz 1</title>
+<link rel="stylesheet" href="/static/style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<div class="page">
+    <div class="brand-mark">DataSense</div>
+    <div class="brand-course">Agent Builder 2026</div>
+    <div class="brand-quiz">Quiz 1 · Tool Calling and ReAct Loop</div>
+    <div class="brand-meta">20 questions · 15 minutes · one attempt per candidate</div>
+
+    <div class="rules">
+        <strong>Before you begin:</strong>
+        <ul>
+            <li>Duration: <b>15 minutes</b>, hard timer. The test auto-submits when time runs out.</li>
+            <li>20 questions total: 10 questions (1 mark each), 5 questions (2 marks each), 5 questions (3 marks each). Maximum: <b>35 marks</b>.</li>
+            <li>You may navigate between questions, change answers, and "Mark for Review" before submitting.</li>
+            <li>No negative marking. Tiebreak by total time taken (faster wins).</li>
+            <li>One attempt per candidate. Duplicate name <em>or</em> email is rejected.</li>
+            <li>Topic: tool-calling APIs, ReAct loops, agent design, failure modes, production scenarios.</li>
+        </ul>
+    </div>
+
+    <h2>Candidate details</h2>
+    <form id="start-form">
+        <div class="form-row">
+            <label for="name">Full Name</label>
+            <input id="name" name="name" type="text" autocomplete="name" required minlength="2" maxlength="80">
+        </div>
+        <div class="form-row">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required maxlength="120">
+        </div>
+
+        <div id="error" class="error" style="display:none"></div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 22px;">
+            <a href="/leaderboard">View leaderboard →</a>
+            <button class="primary" type="submit" id="start-btn">Start Test</button>
+        </div>
+    </form>
+</div>
+
+<script>
+const form = document.getElementById("start-form");
+const errBox = document.getElementById("error");
+const btn = document.getElementById("start-btn");
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errBox.style.display = "none";
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+
+    const name = document.getElementById("name").value.trim();
+    const email = document.getElementById("email").value.trim();
+
+    try {
+        const res = await fetch("/api/start", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name, email}),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            const msg = data.detail || "Could not start test.";
+            throw new Error(msg);
+        }
+        // stash payload for the test page (so we don't need to re-fetch)
+        sessionStorage.setItem("attempt", JSON.stringify(data));
+        window.location.href = `/test/${data.attempt_id}`;
+    } catch (err) {
+        errBox.textContent = err.message || String(err);
+        errBox.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Start Test";
+    }
+});
+</script>
+
+</body>
+</html>

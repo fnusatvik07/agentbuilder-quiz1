@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Marksheet: DataSense Agent Builder 2026 Quiz 1</title>
+<link rel="stylesheet" href="/static/style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<div class="page" style="max-width: 920px;">
+    <div class="brand-mark">DataSense</div>
+    <div class="brand-course">Agent Builder 2026</div>
+    <div class="brand-quiz">Quiz 1 · Tool Calling and ReAct Loop</div>
+    <h1 id="title" style="margin-top: 18px;">Marksheet</h1>
+    <div class="subtitle" id="subtitle">Loading…</div>
+
+    <div class="scorecard" id="scorecard" style="display:none">
+        <div class="stat"><div class="label">Score</div><div class="value" id="s-score"></div></div>
+        <div class="stat"><div class="label">Time taken</div><div class="value" id="s-time"></div></div>
+        <div class="stat"><div class="label">Rank</div><div class="value" id="s-rank"></div></div>
+        <div class="stat"><div class="label">Percentile</div><div class="value" id="s-pct"></div></div>
+    </div>
+
+    <div style="margin: 16px 0;">
+        <a href="/leaderboard">View leaderboard →</a>
+        &nbsp;·&nbsp;
+        <a href="/">Back to home</a>
+    </div>
+
+    <h2>Question-wise breakdown</h2>
+    <div id="breakdown"></div>
+</div>
+
+<script>
+function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${String(s).padStart(2,"0")}s`;
+}
+
+(async function load() {
+    const path = window.location.pathname.split("/").filter(Boolean);
+    const attemptId = path[path.length - 1];
+
+    const res = await fetch(`/api/result/${attemptId}`);
+    if (!res.ok) {
+        document.getElementById("subtitle").textContent = "Could not load result.";
+        return;
+    }
+    const r = await res.json();
+
+    document.getElementById("title").textContent = `Marksheet: ${r.name}`;
+    const submittedAt = new Date(r.submitted_at * 1000).toLocaleString();
+    document.getElementById("subtitle").textContent =
+        `Submitted ${submittedAt} · ${r.total_attempts} candidate(s) so far`;
+
+    document.getElementById("scorecard").style.display = "grid";
+    document.getElementById("s-score").textContent = `${r.score} / ${r.total}`;
+    document.getElementById("s-time").textContent = fmtTime(r.time_sec);
+    document.getElementById("s-rank").textContent = `#${r.rank}`;
+    document.getElementById("s-pct").textContent = (r.percentile == null) ? "..." : `${r.percentile}%`;
+
+    const out = document.getElementById("breakdown");
+    r.breakdown.forEach((b, idx) => {
+        const status = (b.chosen == null) ? "skipped" :
+                       (b.chosen === b.correct ? "correct" : "wrong");
+        const verdict = (status === "skipped") ? "Skipped" :
+                        (status === "correct" ? `+${b.awarded} mark${b.awarded > 1 ? "s" : ""}` : "Wrong (0)");
+
+        const optsHtml = b.options.map(o => {
+            let cls = "opt";
+            if (o.key === b.correct) cls += " correct";
+            if (b.chosen === o.key && o.key !== b.correct) cls += " chosen-wrong";
+            const tag = o.key === b.correct ? " ✓ correct"
+                      : (b.chosen === o.key ? " ✗ your answer" : "");
+            return `<div class="${cls}"><b>${o.key}.</b> ${o.html}${tag ? ` <i style="color:#666; font-size:12px;">${tag}</i>` : ""}</div>`;
+        }).join("");
+
+        const div = document.createElement("div");
+        div.className = `qresult ${status}`;
+        div.innerHTML = `
+            <div class="qhead">
+                <div class="label">Q${b.id} · ${b.marks} mark${b.marks > 1 ? "s" : ""}</div>
+                <div class="verdict">${verdict}</div>
+            </div>
+            <div class="stem">${b.stem_html}</div>
+            <div class="options-static">${optsHtml}</div>
+            <div class="explanation"><span class="label">Why:</span>${b.explanation}</div>
+        `;
+        out.appendChild(div);
+    });
+})();
+</script>
+
+</body>
+</html>

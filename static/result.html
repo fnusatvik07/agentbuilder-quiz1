@@ -35,6 +35,15 @@
         <a href="/"><button>Back to home</button></a>
     </div>
 
+    <div class="mini-lb" id="mini-lb">
+        <h3>
+            <span class="live-pill">Live</span>
+            Class leaderboard so far
+            <span class="last-updated" id="mini-lb-updated"></span>
+        </h3>
+        <div id="mini-lb-table"><div class="empty-state">Loading...</div></div>
+    </div>
+
     <h2>Question-wise breakdown</h2>
 
     <div class="filter-bar">
@@ -71,6 +80,7 @@ function pctFillClass(pct) {
 }
 
 let allResults = [];
+let myName = null;
 
 (async function load() {
     const path = window.location.pathname.split("/").filter(Boolean);
@@ -83,6 +93,7 @@ let allResults = [];
     }
     const r = await res.json();
 
+    myName = r.name;
     document.getElementById("title").textContent = `Marksheet: ${r.name}`;
     const submittedAt = new Date(r.submitted_at * 1000).toLocaleString();
     document.getElementById("subtitle").textContent =
@@ -180,7 +191,64 @@ let allResults = [];
             renderBreakdown(btn.dataset.filter);
         });
     });
+
+    // Start polling the mini live leaderboard
+    refreshMiniLb();
+    setInterval(refreshMiniLb, 5000);
 })();
+
+async function refreshMiniLb() {
+    try {
+        const res = await fetch("/api/leaderboard");
+        if (!res.ok) return;
+        const rows = await res.json();
+        document.getElementById("mini-lb-updated").textContent =
+            "updated " + new Date().toLocaleTimeString();
+        const wrap = document.getElementById("mini-lb-table");
+
+        if (!rows.length) {
+            wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>';
+            return;
+        }
+
+        const TOP_N = 10;
+        const top = rows.slice(0, TOP_N);
+        const myRow = rows.find(r => r.name === myName);
+        const myInTop = top.some(r => r.name === myName);
+
+        let html = `<table>
+            <thead>
+              <tr>
+                <th class="rank-cell">#</th>
+                <th>Name</th>
+                <th class="score-cell">Score</th>
+                <th class="time-cell">Time</th>
+              </tr>
+            </thead>
+            <tbody>`;
+        for (const r of top) {
+            const me = (r.name === myName) ? ' class="you"' : '';
+            const tag = (r.name === myName) ? ' (you)' : '';
+            html += `<tr${me}>
+                <td class="rank-cell">${r.rank}</td>
+                <td>${escapeHtml(r.name)}${tag}</td>
+                <td class="score-cell">${r.score}/${r.total}</td>
+                <td class="time-cell">${fmtTime(r.time_sec)}</td>
+            </tr>`;
+        }
+        if (!myInTop && myRow) {
+            html += `<tr class="ellipsis-row"><td colspan="4">...</td></tr>`;
+            html += `<tr class="you">
+                <td class="rank-cell">${myRow.rank}</td>
+                <td>${escapeHtml(myRow.name)} (you)</td>
+                <td class="score-cell">${myRow.score}/${myRow.total}</td>
+                <td class="time-cell">${fmtTime(myRow.time_sec)}</td>
+            </tr>`;
+        }
+        html += "</tbody></table>";
+        wrap.innerHTML = html;
+    } catch (e) { /* silent */ }
+}
 
 function renderBreakdown(mode) {
     const out = document.getElementById("breakdown");

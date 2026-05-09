@@ -698,6 +698,85 @@ body.test-mode {
 }
 .share-toast.show { opacity: 1; }
 
+/* ---------------- mini live leaderboard on marksheet ---------------- */
+
+.mini-lb {
+    background: #f8fafc;
+    border: 1px solid #d8dde2;
+    border-radius: 4px;
+    padding: 14px 18px;
+    margin: 24px 0;
+}
+.mini-lb h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #444;
+    margin: 0 0 12px 0;
+}
+.mini-lb h3 .last-updated {
+    margin-left: auto;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #777;
+    font-weight: normal;
+}
+.mini-lb table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.mini-lb th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #777;
+    border-bottom: 1px solid #d8dde2;
+    font-weight: 600;
+}
+.mini-lb td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #e1e5ea;
+}
+.mini-lb tr:last-child td { border-bottom: none; }
+.mini-lb tr.you td {
+    background: #eef4fc;
+    font-weight: 600;
+    color: #1454b8;
+}
+.mini-lb tr.you td:first-child {
+    box-shadow: inset 3px 0 0 #1454b8;
+}
+.mini-lb .rank-cell {
+    font-family: "SF Mono", "Monaco", "Consolas", monospace;
+    font-weight: 600;
+    width: 50px;
+}
+.mini-lb .score-cell, .mini-lb .time-cell {
+    font-family: "SF Mono", "Monaco", "Consolas", monospace;
+    font-weight: 600;
+    text-align: right;
+    width: 90px;
+}
+.mini-lb .ellipsis-row td {
+    text-align: center;
+    color: #999;
+    padding: 4px;
+    border: none;
+}
+.mini-lb .empty-state {
+    color: #999;
+    text-align: center;
+    padding: 14px;
+    font-size: 13px;
+}
+
 /* ---------------- print rules ---------------- */
 @media print {
     body { background: #fff; }

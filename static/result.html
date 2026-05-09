@@ -16,6 +16,7 @@
     <h1 id="title" style="margin-top: 18px;">Marksheet</h1>
     <div class="subtitle" id="subtitle">Loading...</div>
 
+    <div id="test-banner-wrap"></div>
     <div id="badge-row"></div>
 
     <div class="scorecard" id="scorecard" style="display:none">
@@ -95,6 +96,28 @@ let myName = null;
 
     myName = r.name;
     document.getElementById("title").textContent = `Marksheet: ${r.name}`;
+
+    // Test-mode banner
+    if (r.is_test) {
+        const banner = document.createElement("div");
+        banner.className = "test-banner";
+        banner.innerHTML = `
+            <span class="badge-test">Test mode</span>
+            <span>This attempt is hidden from the leaderboard, class average, and rank totals. It does not count for any candidate.</span>
+            <span class="spacer"></span>
+            <button class="danger" id="btn-delete-test">Delete this test attempt</button>
+        `;
+        document.getElementById("test-banner-wrap").appendChild(banner);
+        document.getElementById("btn-delete-test").addEventListener("click", async () => {
+            if (!confirm("Delete this test attempt permanently?")) return;
+            const res = await fetch(`/api/result/${r.attempt_id}`, {method: "DELETE"});
+            if (res.ok) {
+                window.location.href = "/";
+            } else {
+                alert("Could not delete: " + (await res.text()));
+            }
+        });
+    }
     const submittedAt = new Date(r.submitted_at * 1000).toLocaleString();
     document.getElementById("subtitle").textContent =
         `Submitted ${submittedAt}  ·  ${r.total_attempts} candidate${r.total_attempts === 1 ? "" : "s"} so far`;

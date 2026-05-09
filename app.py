@@ -44,6 +44,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# Hidden test mode: any email at this domain creates a "test" attempt that is
+# excluded from the leaderboard and class statistics, can be deleted by the
+# attempt holder, and bypasses the single-attempt-per-name/email rule.
+# Not advertised on the public landing page so students cannot game it.
+TEST_EMAIL_SUFFIX = "@test.datasense.local"
+
 # ----------------------------------------------------------------------------
 # DB
 
@@ -62,10 +68,15 @@ def init_db():
                 total        INTEGER,
                 time_sec     INTEGER,
                 answers_json TEXT,
-                breakdown_json TEXT
+                breakdown_json TEXT,
+                is_test      INTEGER NOT NULL DEFAULT 0
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_score ON attempts(score DESC, time_sec ASC)")
+        # Migration: add is_test if running against an older schema
+        cols = [r[1] for r in con.execute("PRAGMA table_info(attempts)").fetchall()]
+        if "is_test" not in cols:
+            con.execute("ALTER TABLE attempts ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager
@@ -156,25 +167,38 @@ def api_start(req: StartRequest):
     email_lc = req.email
     attempt_id = uuid.uuid4().hex[:12]
     now = time.time()
+    is_test = email_lc.endswith(TEST_EMAIL_SUFFIX)
+
+    # Test attempts get unique-suffixed name_lc/email_lc so they bypass the
+    # UNIQUE constraint and never block a real candidate using the same name.
+    if is_test:
+        name_lc_stored = f"{name_lc}::test::{attempt_id}"
+        email_lc_stored = f"{email_lc}::test::{attempt_id}"
+    else:
+        name_lc_stored = name_lc
+        email_lc_stored = email_lc
 
     with db() as con:
-        # uniqueness check (name OR email)
-        existing = con.execute(
-            "SELECT id, name, email FROM attempts WHERE name_lc = ? OR email_lc = ? LIMIT 1",
-            (name_lc, email_lc),
-        ).fetchone()
-        if existing:
-            field = "name" if existing["name"].lower() == name_lc else "email"
-            raise HTTPException(
-                status_code=409,
-                detail=f"This {field} has already started a test. Each candidate may attempt only once.",
-            )
+        # Uniqueness check only against real (non-test) attempts.
+        if not is_test:
+            existing = con.execute(
+                """SELECT id, name, email FROM attempts
+                    WHERE (name_lc = ? OR email_lc = ?) AND is_test = 0
+                    LIMIT 1""",
+                (name_lc, email_lc),
+            ).fetchone()
+            if existing:
+                field = "name" if existing["name"].lower() == name_lc else "email"
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This {field} has already started a test. Each candidate may attempt only once.",
+                )
 
         try:
             con.execute(
-                """INSERT INTO attempts (id, name, name_lc, email, email_lc, started_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (attempt_id, req.name, name_lc, req.email, email_lc, now),
+                """INSERT INTO attempts (id, name, name_lc, email, email_lc, started_at, is_test)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (attempt_id, req.name, name_lc_stored, req.email, email_lc_stored, now, 1 if is_test else 0),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Duplicate name or email.")
@@ -186,6 +210,7 @@ def api_start(req: StartRequest):
         "questions": public_questions(),
         "total_marks": TOTAL_MARKS,
         "name": req.name,
+        "is_test": is_test,
     }
 
 
@@ -262,16 +287,17 @@ def api_result(attempt_id: str):
             if q:
                 entry["stem_html"] = q["stem_html"]
                 entry["options"] = q["options"]
-        # rank
+        # rank computed against REAL (non-test) attempts only
         rank_row = con.execute(
             """SELECT COUNT(*) + 1 AS rank FROM attempts
                 WHERE submitted_at IS NOT NULL
+                  AND is_test = 0
                   AND ( score > ?
                         OR (score = ? AND time_sec < ?) )""",
             (row["score"], row["score"], row["time_sec"]),
         ).fetchone()
         all_submitted = con.execute(
-            "SELECT score, time_sec FROM attempts WHERE submitted_at IS NOT NULL"
+            "SELECT score, time_sec FROM attempts WHERE submitted_at IS NOT NULL AND is_test = 0"
         ).fetchall()
         total_attempts = len(all_submitted)
 
@@ -341,7 +367,21 @@ def api_result(attempt_id: str):
         "class_context": class_context,
         "badge": badge,
         "breakdown": breakdown,
+        "is_test": bool(row["is_test"]),
     }
+
+
+@app.delete("/api/result/{attempt_id}")
+def api_delete_test_attempt(attempt_id: str):
+    """Delete an attempt. Allowed only for is_test=1 attempts."""
+    with db() as con:
+        row = con.execute("SELECT is_test FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="not found")
+        if not row["is_test"]:
+            raise HTTPException(status_code=403, detail="only test attempts can be deleted")
+        con.execute("DELETE FROM attempts WHERE id = ?", (attempt_id,))
+    return {"deleted": attempt_id}
 
 
 @app.get("/api/leaderboard")
@@ -350,7 +390,7 @@ def api_leaderboard():
         rows = con.execute(
             """SELECT name, score, total, time_sec, submitted_at
                  FROM attempts
-                WHERE submitted_at IS NOT NULL
+                WHERE submitted_at IS NOT NULL AND is_test = 0
                 ORDER BY score DESC, time_sec ASC, submitted_at ASC"""
         ).fetchall()
     out = []

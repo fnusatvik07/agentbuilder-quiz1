@@ -38,7 +38,7 @@ from questions import QUESTIONS, TOTAL_MARKS, by_id, public_questions
 # Config
 
 DB_PATH = os.environ.get("QUIZ_DB", str(Path(__file__).parent / "quiz.db"))
-DURATION_SEC = 15 * 60          # 15 minutes
+DURATION_SEC = 25 * 60          # 25 minutes
 GRACE_SEC = 30                  # accept submissions up to 30s past the bell
 STATIC_DIR = Path(__file__).parent / "static"
 

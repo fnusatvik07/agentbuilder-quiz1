@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Marksheet: DataSense Agent Builder 2026 Quiz 1</title>
+<title>Marksheet · DataSense Agent Builder 2026 Quiz 1</title>
 <link rel="stylesheet" href="/static/style.css">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
@@ -12,8 +12,11 @@
     <div class="brand-mark">DataSense</div>
     <div class="brand-course">Agent Builder 2026</div>
     <div class="brand-quiz">Quiz 1 · Tool Calling and ReAct Loop</div>
+
     <h1 id="title" style="margin-top: 18px;">Marksheet</h1>
-    <div class="subtitle" id="subtitle">Loading…</div>
+    <div class="subtitle" id="subtitle">Loading...</div>
+
+    <div id="badge-row"></div>
 
     <div class="scorecard" id="scorecard" style="display:none">
         <div class="stat"><div class="label">Score</div><div class="value" id="s-score"></div></div>
@@ -22,15 +25,31 @@
         <div class="stat"><div class="label">Percentile</div><div class="value" id="s-pct"></div></div>
     </div>
 
-    <div style="margin: 16px 0;">
-        <a href="/leaderboard">View leaderboard →</a>
-        &nbsp;·&nbsp;
-        <a href="/">Back to home</a>
+    <div id="tier-wrap"></div>
+    <div id="class-wrap"></div>
+
+    <div class="action-row">
+        <a href="/leaderboard"><button>View leaderboard</button></a>
+        <button id="btn-print">Print or save as PDF</button>
+        <button id="btn-share">Copy link to this marksheet</button>
+        <a href="/"><button>Back to home</button></a>
     </div>
 
     <h2>Question-wise breakdown</h2>
+
+    <div class="filter-bar">
+        <span class="filter-label">Show:</span>
+        <button class="active" data-filter="all" id="f-all">All</button>
+        <button data-filter="wrong" id="f-wrong">Wrong only</button>
+        <button data-filter="right" id="f-right">Correct only</button>
+        <span class="spacer"></span>
+        <span id="filter-count" style="color:#666; font-size:12px;"></span>
+    </div>
+
     <div id="breakdown"></div>
 </div>
+
+<div class="share-toast" id="toast">Link copied to clipboard</div>
 
 <script>
 function fmtTime(sec) {
@@ -38,6 +57,20 @@ function fmtTime(sec) {
     const s = sec % 60;
     return `${m}m ${String(s).padStart(2,"0")}s`;
 }
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+    }[c]));
+}
+
+function pctFillClass(pct) {
+    if (pct < 40) return "low";
+    if (pct < 70) return "mid";
+    return "";
+}
+
+let allResults = [];
 
 (async function load() {
     const path = window.location.pathname.split("/").filter(Boolean);
@@ -53,18 +86,116 @@ function fmtTime(sec) {
     document.getElementById("title").textContent = `Marksheet: ${r.name}`;
     const submittedAt = new Date(r.submitted_at * 1000).toLocaleString();
     document.getElementById("subtitle").textContent =
-        `Submitted ${submittedAt} · ${r.total_attempts} candidate(s) so far`;
+        `Submitted ${submittedAt}  ·  ${r.total_attempts} candidate${r.total_attempts === 1 ? "" : "s"} so far`;
 
+    // Achievement badge
+    if (r.badge) {
+        const div = document.createElement("div");
+        div.className = `badge ${r.badge.tier}`;
+        div.textContent = r.badge.label;
+        document.getElementById("badge-row").appendChild(div);
+    }
+
+    // Scorecard
     document.getElementById("scorecard").style.display = "grid";
     document.getElementById("s-score").textContent = `${r.score} / ${r.total}`;
     document.getElementById("s-time").textContent = fmtTime(r.time_sec);
     document.getElementById("s-rank").textContent = `#${r.rank}`;
     document.getElementById("s-pct").textContent = (r.percentile == null) ? "..." : `${r.percentile}%`;
 
+    // Tier breakdown
+    if (r.tier_breakdown && r.tier_breakdown.length) {
+        const tierLabels = {1: "1-mark questions (basics)",
+                            2: "2-mark questions (analysis)",
+                            3: "3-mark questions (production)"};
+        let html = `<div class="tier-section">
+            <h3>Performance by tier</h3>`;
+        for (const t of r.tier_breakdown) {
+            const pct = (t.points_possible > 0)
+                ? Math.round(100 * t.points_earned / t.points_possible) : 0;
+            const fill = pctFillClass(pct);
+            html += `
+                <div class="tier-row">
+                    <div class="tier-label">${tierLabels[t.marks] || (t.marks+"-mark")}</div>
+                    <div class="tier-bar"><div class="tier-fill ${fill}" style="width:${pct}%"></div></div>
+                    <div class="tier-stat">${t.points_earned}/${t.points_possible} pts (${t.correct}/${t.total_questions})</div>
+                </div>`;
+        }
+        html += "</div>";
+        document.getElementById("tier-wrap").innerHTML = html;
+    }
+
+    // Class context
+    if (r.class_context) {
+        const c = r.class_context;
+        const scoreDelta = r.score - c.avg_score;
+        const timeDelta = r.time_sec - c.median_time_sec;
+        const scoreDeltaCls = scoreDelta >= 0 ? "positive" : "negative";
+        const timeDeltaCls = timeDelta <= 0 ? "positive" : "negative";  // faster = positive
+        const scoreSign = scoreDelta >= 0 ? "+" : "";
+        const timeSign = timeDelta >= 0 ? "+" : "";
+        document.getElementById("class-wrap").innerHTML = `
+            <div class="class-context">
+                <h3>Class context (${c.n} candidates so far)</h3>
+                <div class="ctx-row">
+                    <span>Class average score</span>
+                    <span><b>${c.avg_score} / ${r.total}</b> &nbsp;·&nbsp; you: <b>${r.score}</b>
+                          <span class="delta ${scoreDeltaCls}">(${scoreSign}${scoreDelta.toFixed(1)})</span>
+                    </span>
+                </div>
+                <div class="ctx-row">
+                    <span>Class median time</span>
+                    <span><b>${fmtTime(c.median_time_sec)}</b> &nbsp;·&nbsp; you: <b>${fmtTime(r.time_sec)}</b>
+                          <span class="delta ${timeDeltaCls}">(${timeSign}${Math.round(timeDelta)}s)</span>
+                    </span>
+                </div>
+            </div>
+        `;
+    }
+
+    // Question breakdown
+    allResults = r.breakdown;
+    renderBreakdown("all");
+
+    // Wire actions
+    document.getElementById("btn-print").addEventListener("click", () => window.print());
+    document.getElementById("btn-share").addEventListener("click", async () => {
+        const url = window.location.href;
+        try {
+            await navigator.clipboard.writeText(url);
+            const t = document.getElementById("toast");
+            t.classList.add("show");
+            setTimeout(() => t.classList.remove("show"), 1800);
+        } catch (e) {
+            prompt("Copy this URL:", url);
+        }
+    });
+
+    // Filter buttons
+    document.querySelectorAll(".filter-bar button[data-filter]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".filter-bar button[data-filter]")
+                .forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            renderBreakdown(btn.dataset.filter);
+        });
+    });
+})();
+
+function renderBreakdown(mode) {
     const out = document.getElementById("breakdown");
-    r.breakdown.forEach((b, idx) => {
+    out.innerHTML = "";
+
+    let visible = 0;
+    for (const b of allResults) {
         const status = (b.chosen == null) ? "skipped" :
                        (b.chosen === b.correct ? "correct" : "wrong");
+        const matches = (mode === "all") ||
+                        (mode === "wrong" && (status === "wrong" || status === "skipped")) ||
+                        (mode === "right" && status === "correct");
+        if (!matches) continue;
+        visible++;
+
         const verdict = (status === "skipped") ? "Skipped" :
                         (status === "correct" ? `+${b.awarded} mark${b.awarded > 1 ? "s" : ""}` : "Wrong (0)");
 
@@ -81,7 +212,7 @@ function fmtTime(sec) {
         div.className = `qresult ${status}`;
         div.innerHTML = `
             <div class="qhead">
-                <div class="label">Q${b.id} · ${b.marks} mark${b.marks > 1 ? "s" : ""}</div>
+                <div class="label">Q${b.id}  ·  ${b.marks} mark${b.marks > 1 ? "s" : ""}</div>
                 <div class="verdict">${verdict}</div>
             </div>
             <div class="stem">${b.stem_html}</div>
@@ -89,8 +220,11 @@ function fmtTime(sec) {
             <div class="explanation"><span class="label">Why:</span>${b.explanation}</div>
         `;
         out.appendChild(div);
-    });
-})();
+    }
+
+    document.getElementById("filter-count").textContent =
+        `Showing ${visible} of ${allResults.length}`;
+}
 </script>
 
 </body>

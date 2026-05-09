@@ -270,13 +270,61 @@ def api_result(attempt_id: str):
                         OR (score = ? AND time_sec < ?) )""",
             (row["score"], row["score"], row["time_sec"]),
         ).fetchone()
-        total_attempts = con.execute(
-            "SELECT COUNT(*) AS n FROM attempts WHERE submitted_at IS NOT NULL"
-        ).fetchone()["n"]
+        all_submitted = con.execute(
+            "SELECT score, time_sec FROM attempts WHERE submitted_at IS NOT NULL"
+        ).fetchall()
+        total_attempts = len(all_submitted)
 
     percentile = None
     if total_attempts > 1:
         percentile = round(100.0 * (total_attempts - rank_row["rank"]) / (total_attempts - 1))
+
+    # Tier breakdown: group by marks (1, 2, 3)
+    tier_stats = {}
+    for entry in breakdown:
+        m = entry["marks"]
+        t = tier_stats.setdefault(m, {"correct": 0, "total_questions": 0,
+                                       "points_earned": 0, "points_possible": 0,
+                                       "skipped": 0})
+        t["total_questions"] += 1
+        t["points_possible"] += entry["marks"]
+        if entry["chosen"] is None:
+            t["skipped"] += 1
+        elif entry["chosen"] == entry["correct"]:
+            t["correct"] += 1
+            t["points_earned"] += entry["awarded"]
+    tier_breakdown = []
+    for marks in sorted(tier_stats.keys()):
+        tier_breakdown.append({"marks": marks, **tier_stats[marks]})
+
+    # Class context (only meaningful with >= 3 submissions)
+    class_context = None
+    if total_attempts >= 3:
+        scores = sorted(r["score"] for r in all_submitted)
+        times = sorted(r["time_sec"] for r in all_submitted)
+        avg_score = sum(scores) / len(scores)
+        median_score = scores[len(scores) // 2]
+        median_time = times[len(times) // 2]
+        class_context = {
+            "n": total_attempts,
+            "avg_score": round(avg_score, 1),
+            "median_score": median_score,
+            "median_time_sec": median_time,
+        }
+
+    # Achievement badge
+    badge = None
+    pct_score = (row["score"] / row["total"]) * 100 if row["total"] else 0
+    if row["score"] == row["total"]:
+        badge = {"label": "Perfect Score", "tier": "gold"}
+    elif percentile is not None and percentile >= 90:
+        badge = {"label": "Top 10%", "tier": "gold"}
+    elif percentile is not None and percentile >= 75:
+        badge = {"label": "Top Quartile", "tier": "silver"}
+    elif pct_score >= 80:
+        badge = {"label": "Distinction (80%+)", "tier": "silver"}
+    elif pct_score >= 60:
+        badge = {"label": "Pass (60%+)", "tier": "bronze"}
 
     return {
         "attempt_id": attempt_id,
@@ -289,6 +337,9 @@ def api_result(attempt_id: str):
         "rank": rank_row["rank"],
         "total_attempts": total_attempts,
         "percentile": percentile,
+        "tier_breakdown": tier_breakdown,
+        "class_context": class_context,
+        "badge": badge,
         "breakdown": breakdown,
     }
 
